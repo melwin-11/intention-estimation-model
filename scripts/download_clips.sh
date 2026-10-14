@@ -14,6 +14,11 @@
 # Settings:  KEEP_ZIPS=1    keep the zip files after unpacking.
 #            ZIP_DIR=<dir>  where zips are stored (default ./PIE_zips).
 # Safety:    Refuses to run inside a git repository, so clips never land in the code repo.
+#            To download inside a repository on purpose, run with ALLOW_GIT_DIR=1:
+#                ALLOW_GIT_DIR=1 bash scripts/download_clips.sh
+#            The script then checks that PIE_clips and PIE_zips are git-ignored and
+#            prints a warning if they are not, because committing video files would
+#            bloat the repository.
 # Resuming:  Safe to rerun. A zip that is already complete is not downloaded again,
 #            and files that are already unpacked are not overwritten.
 # Space:     Needs about twice the zip size free while a set is unpacking
@@ -50,9 +55,16 @@ if ! python3 -c "import gdown" 2> /dev/null; then
 fi
 
 if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
-    echo "The current directory is inside a git repository: $(pwd)" >&2
-    echo "Change to your dataset directory first, for example: cd /data/PIE_dataset" >&2
-    exit 1
+    if [ "${ALLOW_GIT_DIR:-0}" != "1" ]; then
+        echo "The current directory is inside a git repository: $(pwd)" >&2
+        echo "Change to your dataset directory first, or rerun with ALLOW_GIT_DIR=1 to download here on purpose." >&2
+        exit 1
+    fi
+    for tracked_name in "${CLIPS_DIR}/probe.mp4" "${ZIP_DIR}/probe.zip"; do
+        if ! git check-ignore -q "${tracked_name}"; then
+            echo "Warning: ${tracked_name%/*} is not git-ignored here. Add it to .gitignore before running git add." >&2
+        fi
+    done
 fi
 
 echo "Destination: $(pwd)/${CLIPS_DIR}"
