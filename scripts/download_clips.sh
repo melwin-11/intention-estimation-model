@@ -70,24 +70,46 @@ fi
 echo "Destination: $(pwd)/${CLIPS_DIR}"
 mkdir -p "${ZIP_DIR}" "${CLIPS_DIR}"
 
-declare -A FILE_IDS
-while read -r file_id file_name; do
-    FILE_IDS["${file_name}"]="${file_id}"
-done < <(python3 - "${FOLDER_URL}" << 'PY'
+FOLDER_LISTING="$(python3 - "${FOLDER_URL}" << 'PY'
+import inspect
 import os
 import sys
 
 import gdown
 
-entries = gdown.download_folder(url=sys.argv[1], skip_download=True, quiet=True, remaining_ok=True)
-for entry in entries:
+parameters = inspect.signature(gdown.download_folder).parameters
+if "skip_download" not in parameters:
+    sys.exit("This gdown version cannot list a folder without downloading it. Run: pip install -U gdown")
+
+options = {"url": sys.argv[1], "quiet": True, "skip_download": True}
+if "remaining_ok" in parameters:
+    options["remaining_ok"] = True
+
+for entry in gdown.download_folder(**options):
     print(entry.id, os.path.basename(entry.path))
 PY
-)
-
-if [ "${#FILE_IDS[@]}" -eq 0 ]; then
-    echo "Could not read the Drive folder listing. Update gdown (pip install -U gdown) and retry." >&2
+)" || {
+    echo "Could not read the Drive folder listing (see the error above)." >&2
     exit 1
+}
+
+declare -A FILE_IDS=()
+FILE_COUNT=0
+while read -r file_id file_name; do
+    if [ -n "${file_id}" ]; then
+        FILE_IDS["${file_name}"]="${file_id}"
+        FILE_COUNT=$((FILE_COUNT + 1))
+    fi
+done <<< "${FOLDER_LISTING}"
+
+if [ "${FILE_COUNT}" -eq 0 ]; then
+    echo "The Drive folder listing was empty. Update gdown (pip install -U gdown) and retry." >&2
+    exit 1
+fi
+
+GDOWN_OPTIONS=(--continue)
+if gdown --help 2>&1 | grep -q -- '--retries'; then
+    GDOWN_OPTIONS+=(--retries 5)
 fi
 
 for set_id in "${SET_IDS[@]}"; do
@@ -108,7 +130,7 @@ for set_id in "${SET_IDS[@]}"; do
             exit 1
         fi
         echo "Downloading ${zip_name}"
-        gdown --continue "https://drive.google.com/uc?id=${file_id}" -O "${zip_path}"
+        gdown "${GDOWN_OPTIONS[@]}" "https://drive.google.com/uc?id=${file_id}" -O "${zip_path}"
     else
         echo "${zip_name} is already downloaded."
     fi
